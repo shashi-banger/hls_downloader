@@ -12,12 +12,12 @@ import shlex, subprocess
 #from amg_apps.mongo_db_interfaces.mongo_db_interfaces import DbInterface
 
 class FfmpegSegmentConcatenator(Thread):
-    def __init__(self, recording_dir, collection_name=None):
+    def __init__(self, nsegments, recording_dir, collection_name=None):
         self.t = Thread.__init__(self)
         self.recording_dir = recording_dir
         self.seg_inp_q = Queue()
         self.segment_list = []
-        self.num_segment_to_concat = 720
+        self.num_segment_to_concat = nsegments
         self.collection_name = collection_name
         #self.db_io = DbInterface('auto_ad_mine')
 
@@ -37,7 +37,7 @@ class FfmpegSegmentConcatenator(Thread):
             seg_list_f.write("file '%s'\n" % f)
         seg_list_f.close()
         out_file = self.recording_dir + '/' + 'recording_%d.mp4' % int(time.time())
-        cmd = 'ffmpeg -f concat -safe 0 -i %s -vcodec h264 -acodec mp2 -preset ultrafast %s' %\
+        cmd = 'ffmpeg -f concat -safe 0 -i %s -vcodec copy -acodec copy %s' %\
                                       (seg_list_fname, out_file)
         print(cmd)
 
@@ -58,6 +58,7 @@ class FfmpegSegmentConcatenator(Thread):
                 break
             self.segment_list.append(seg_filename)
             if len(self.segment_list) >= self.num_segment_to_concat:
+                print("+++++++++++CALLING ffmpeg concat", self.num_segment_to_concat)
                 self.ffmpeg_concat()
                 del self.segment_list[:]
             self.seg_inp_q.task_done()
@@ -93,13 +94,13 @@ class SegmentDownloader(Thread):
         if not fname.endswith('.ts'):
             fname = fname + '.ts'
         dest_file = self.download_dir + '/%d_' % self.file_num + fname
-        print("==============", uri, dest_file)
+        #print("==============", uri, dest_file)
         self.c.setopt(self.c.URL, uri)
         out_f = open(dest_file, 'wb')
         self.c.setopt(self.c.WRITEDATA, out_f)
         self.c.setopt(self.c.FOLLOWLOCATION, True)
         self.c.setopt(pycurl.USERAGENT, 'Mozilla/5.0')
-        self.c.setopt(pycurl.VERBOSE, True)
+        #self.c.setopt(pycurl.VERBOSE, True)
         self.c.perform()
         self.file_num += 1
         return dest_file
@@ -117,13 +118,13 @@ class SegmentDownloader(Thread):
 
 
 class PlaylistReader(Thread):
-    def __init__(self, pl_uri, seg_path, rec_path, out_collection_name=None):
+    def __init__(self, pl_uri, seg_path, rec_path, nsegments, out_collection_name=None):
         self.pl_uri = pl_uri
         self.t = Thread.__init__(self)
         self.segment_uris = []
         self.max_segments = 500
         self.terminate_flag = False
-        self.recorder = FfmpegSegmentConcatenator(rec_path, out_collection_name)
+        self.recorder = FfmpegSegmentConcatenator(nsegments, rec_path, out_collection_name)
         self.seg_downloader = SegmentDownloader(seg_path, self.recorder)
         self.recorder.start()
         self.seg_downloader.start()
@@ -146,7 +147,7 @@ class PlaylistReader(Thread):
                 continue
 
             #print m3u8_obj.segments
-            print(m3u8_obj.playlist_type)
+            #print(m3u8_obj.playlist_type)
             for s in m3u8_obj.segments:
                 # Check if the segment uri is an absolute uri
                 if bool(urlparse(s.uri).netloc):
