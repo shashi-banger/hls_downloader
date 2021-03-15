@@ -6,14 +6,15 @@ from urllib.parse import urljoin
 from hlsdownloader import PlaylistReader
 
 class GenericDownloader(object):
-    def __init__(self, inp_url, dest_seg_dir, dest_rec_dir, nsegments, collection):
+
+    def __init__(self, inp_url, dest_seg_dir, dest_rec_dir, nsegments, dest_width, collection):
         self.inp_url = inp_url
         self.dest_seg_dir = dest_seg_dir
         self.dest_rec_dir = dest_rec_dir
         self.pl_downloader = None
         p = m3u8.load(self.inp_url)
         if p.is_variant:
-            dest_width = 512
+            #dest_width = 512
             '''
             Find the nearest variant to the destination width
             '''
@@ -34,6 +35,9 @@ class GenericDownloader(object):
         else:
             raise Exception("Input URL does not correspond to a variant playlist")
 
+    def close(self):
+        self.pl_downloader.close()
+
 
 
 if __name__ == "__main__":
@@ -44,12 +48,20 @@ if __name__ == "__main__":
     parser.add_argument('-ds', '--dest_segments_dir', dest='dest_segment_dir', required=True, help='Destination directory where the segments will be saved')
     parser.add_argument('-dr', '--dest_recording_dir', dest='dest_recording_dir', required=True, help='Destination directory where the hourly recordings will be saved')
     parser.add_argument('-n', '--nsegments', dest='nsegments', required=False, default=720, help='Number of segments to aggregate before saving concatenated segments to dest_recording_dir')
+    parser.add_argument('--duration', dest='duration', required=False, type=int, default=100, help="Recording duration in seconds(default 100s")
+    parser.add_argument('--width', dest='dest_width', default=512, required=False, type=int, help="Resolution with width nearest to this will be recorded")
 
     options = parser.parse_args()
 
-    GenericDownloader(options.inp_url, options.dest_segment_dir, options.dest_recording_dir, int(options.nsegments), options.collection)
 
+    gd = GenericDownloader(options.inp_url, options.dest_segment_dir, options.dest_recording_dir, int(options.nsegments), options.dest_width, options.collection)
+
+
+    start_time = time.time()
     while True:
         time.sleep(5)
+        if (time.time() - start_time) > options.duration:
+            gd.close()
+            break
 
 

@@ -19,14 +19,25 @@ class FfmpegSegmentConcatenator(Thread):
         self.segment_list = []
         self.num_segment_to_concat = nsegments
         self.collection_name = collection_name
+        self.concat_state = False
+        self.terminate_flag = False
+        if not os.path.exists(self.recording_dir):
+            os.makedirs(self.recording_dir)
         #self.db_io = DbInterface('auto_ad_mine')
 
     def enqueue(self, new_seg):
         self.seg_inp_q.put(new_seg)
 
+    def wait_for_concat_completion(self):
+        while True:
+            time.sleep(2)
+            if self.concat_state == False:
+                break
+
     def close(self):
         self.seg_inp_q.put(None)
         print("calling self.seg_inp_q.join")
+        self.terminate_flag = True
         self.seg_inp_q.join()
         print("finished self.seg_inp_q.join")
 
@@ -37,6 +48,8 @@ class FfmpegSegmentConcatenator(Thread):
             seg_list_f.write("file '%s'\n" % f)
         seg_list_f.close()
         out_file = self.recording_dir + '/' + 'recording_%d.mp4' % int(time.time())
+        
+        
         cmd = 'ffmpeg -f concat -safe 0 -i %s -vcodec copy -acodec copy %s' %\
                                       (seg_list_fname, out_file)
         print(cmd)
@@ -52,15 +65,19 @@ class FfmpegSegmentConcatenator(Thread):
         #    self.db_io.write_doc(self.collection_name, dic)
 
     def run(self):
-        while True:
+        while not self.terminate_flag:
             seg_filename = self.seg_inp_q.get(block=True)
             if seg_filename is None:
                 break
             self.segment_list.append(seg_filename)
             if len(self.segment_list) >= self.num_segment_to_concat:
                 print("+++++++++++CALLING ffmpeg concat", self.num_segment_to_concat)
+                self.concat_state = True
                 self.ffmpeg_concat()
+                for seg in self.segment_list:
+                    os.remove(seg)
                 del self.segment_list[:]
+                self.concat_state = False
             self.seg_inp_q.task_done()
         self.seg_inp_q.task_done()
 
@@ -85,8 +102,8 @@ class SegmentDownloader(Thread):
         self.seg_url_q.put(None)
         print("calling self.seg_url_q.join")
         self.seg_url_q.join()
-        print("calling self.seg_url_q.join")
-        self.ffmpeg_concatenator.close()
+        print("finished self.seg_url_q.join")
+        
 
     def __download_uri__(self, uri):
         r = urlparse(uri)
@@ -96,6 +113,9 @@ class SegmentDownloader(Thread):
         dest_file = self.download_dir + '/%d_' % self.file_num + fname
         #print("==============", uri, dest_file)
         self.c.setopt(self.c.URL, uri)
+        dest_dir = os.path.dirname(dest_file)
+        if not os.path.exists(dest_dir):
+            os.makedirs(dest_dir)
         out_f = open(dest_file, 'wb')
         self.c.setopt(self.c.WRITEDATA, out_f)
         self.c.setopt(self.c.FOLLOWLOCATION, True)
@@ -136,6 +156,9 @@ class PlaylistReader(Thread):
     def close(self):
         self.terminate_flag = True
         self.seg_downloader.close()
+        self.recorder.wait_for_concat_completion()
+        self.recorder.close()
+        
 
     def run(self):
         while not self.terminate_flag:
